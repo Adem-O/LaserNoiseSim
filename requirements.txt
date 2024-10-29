@@ -14,4 +14,4 @@ jupyter_core==5.5.0
 jupyter_server==2.10.0
 jupyterlab==4.0.8
 traitlets==5.7.1
-viola==0.5.8
+viola==0.3.8
