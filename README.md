@@ -1,5 +1,6 @@
+Here is a repo for the laser frequency noise simulator.
 
-Run this notebook using binder -> [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/Adem-O/LaserNoiseSim/HEAD?urlpath=voila%2Frender%2FNoise-V3.ipynb)
+To run the simulator using voila and binder click this link -> [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/Adem-O/LaserNoiseSim/HEAD?urlpath=voila%2Frender%2FNoise-V3.ipynb)
 
-Or Click this link: [https://mybinder.org/v2/gh/Adem-O/LaserNoiseSim/HEAD?urlpath=voila%2Frender%2FNoise-V3.ipynb](https://mybinder.org/v2/gh/Adem-O/LaserNoiseSim/HEAD?urlpath=voila%2Frender%2FNoise-V3.ipynb
+Or use this URL: [https://mybinder.org/v2/gh/Adem-O/LaserNoiseSim/HEAD?urlpath=voila%2Frender%2FNoise-V3.ipynb](https://mybinder.org/v2/gh/Adem-O/LaserNoiseSim/HEAD?urlpath=voila%2Frender%2FNoise-V3.ipynb
 )
