@@ -1,0 +1,4 @@
+#!/bin/bash
+# Install additional dependencies or perform setup tasks
+# For example, ensure Voila is installed
+pip install voila
