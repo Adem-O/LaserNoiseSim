@@ -6,4 +6,7 @@ viola
 numpy
 scipy
 jupyter-server-proxy
-
+bqplot
+ipympl
+ipyvolume
+voila
