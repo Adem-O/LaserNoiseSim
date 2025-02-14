@@ -1,4 +1,4 @@
-Here is a repo for the laser frequency noise simulator.
+Here is a repo for a laser frequency noise simulator. The theory is based on Keller, Ultrafast Lasers.
 
 To run the simulator using voila and binder click this link -> [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/Adem-O/LaserNoiseSim/HEAD?urlpath=voila%2Frender%2FNoise-V4.ipynb)
 
