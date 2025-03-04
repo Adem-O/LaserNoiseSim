@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- If "2025.2.4" doesn't work, try "2023.09.1" or some known stable version. -->
+    <link rel="stylesheet" href="https://pyscript.net/releases/2025.2.4/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2025.2.4/core.js"></script>
+  </head>
+  <body>
+    <py-config>
+    {
+      "packages": [
+        "numpy",
+        "scipy",
+        "matplotlib"
+      ]
+    }
+    </py-config>
+
+    <h1>Frequency Noise Simulation (https://github.com/Adem-O/LaserNoiseSim)</h1>
+
+    <!--
+      1) Basic parameters
+    -->
+    <div style="border:1px solid #ccc; padding:1em; margin-bottom:1em;">
+      <h3>Basic Parameters</h3>
+      <label style="margin-right:1em;">
+        Num Time Points (N):
+        <input id="N_value" type="number" value="25000" step="1000" />
+      </label>
+      <label style="margin-right:1em;">
+        Total Time (s) (T):
+        <input id="T_value" type="number" value="0.1" step="0.001" />
+      </label>
+      <label style="margin-right:1em;">
+        Central Freq (Hz):
+        <input id="f_central_value" type="number" value="10000" step="100" />
+      </label>
+    </div>
+
+    <!--
+      2) Power-law PSD 
+    -->
+    <div style="border:1px solid #ccc; padding:1em; margin-bottom:1em;">
+      <h3>Power-law PSD contributions</h3>
+      <div>
+        <input id="include_fm3" type="checkbox" />
+        <label>Include f⁻³</label>
+        <input id="amp_fm3" type="number" value="1" step="0.1" />
+      </div>
+      <div>
+        <input id="include_fm2" type="checkbox" />
+        <label>Include f⁻²</label>
+        <input id="amp_fm2" type="number" value="1" step="0.1" />
+      </div>
+      <div>
+        <input id="include_fm1" type="checkbox" />
+        <label>Include f⁻¹</label>
+        <input id="amp_fm1" type="number" value="1" step="0.1" />
+      </div>
+      <div>
+        <input id="include_f0" type="checkbox" checked />
+        <label>Include f⁰ (white noise)</label>
+        <input id="amp_f0" type="number" value="0.1" step="0.1" />
+      </div>
+      <div>
+        <input id="include_fp1" type="checkbox" />
+        <label>Include f¹</label>
+        <input id="amp_fp1" type="number" value="0.001" step="0.001" />
+      </div>
+      <div>
+        <input id="include_fp2" type="checkbox" />
+        <label>Include f²</label>
+        <input id="amp_fp2" type="number" value="0.001" step="0.001" />
+      </div>
+    </div>
+
+    <!--
+      3) Gaussian noise peak
+    -->
+    <div style="border:1px solid #ccc; padding:1em; margin-bottom:1em;">
+      <h3>Gaussian Noise Peak</h3>
+      <div>
+        <input id="include_peak" type="checkbox" />
+        <label>Include Noise Peak</label>
+      </div>
+      <label style="margin-right:1em;">
+        Peak Frequency (Hz):
+        <input id="peak_location" type="number" value="9000" step="100" />
+      </label>
+      <label style="margin-right:1em;">
+        Peak Amplitude:
+        <input id="peak_amplitude" type="number" value="10000" step="10" />
+      </label>
+      <label style="margin-right:1em;">
+        Peak Width (Hz):
+        <input id="peak_width" type="number" value="100" step="10" />
+      </label>
+    </div>
+
+    <!--
+      4) Plotting Options
+    -->
+    <div style="border:1px solid #ccc; padding:1em; margin-bottom:1em;">
+      <h3>Plotting Options</h3>
+      <div>
+        <input id="show_all" type="checkbox" />
+        <label>Show each PSD contribution</label>
+      </div>
+      <div>
+        <input id="show_beta_line" type="checkbox" />
+        <label>Show beta-separation line</label>
+      </div>
+    </div>
+
+    <!--
+      5) Run button
+    -->
+    <button py-click="updatePlot">
+      Run
+    </button>
+
+    <!--
+      6) Our plot container (just a plain DIV). We'll put <img> in here ourselves.
+    -->
+    <div id="plots" style="margin-top:2em; border:1px dashed #aaa; min-height:400px; padding:1em;">
+      <!-- The Python code will insert <img> here. -->
+      <p>Plot will appear here</p>
+    </div>
+
+
+    <!--
+      7) PyScript code block WITHOUT "output='...'".
+         We do not rely on plt.show hooking. We'll do base64 export.
+    -->
+    <py-script>
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.fft import rfftfreq, irfft, fft, fftshift, fftfreq
+from scipy.integrate import cumulative_trapezoid
+import js, sys, io, base64
+import matplotlib
+from matplotlib.gridspec import GridSpec
+matplotlib.set_loglevel("critical")
+
+def generate_power_law_psd(freqs, exponent, amplitude=1.0):
+    mask = freqs>0
+    psd = np.zeros_like(freqs)
+    base = amplitude*(freqs[mask]**exponent)
+    random_factor = 1 + 0.2*np.random.randn(len(freqs[mask]))
+    psd[mask] = base*random_factor + 1e-18
+    return psd
+
+def add_gaussian_peak(freqs, peak_loc, peak_amp, peak_width):
+    mask = freqs>0
+    psd_peak = np.zeros_like(freqs)
+    subset = freqs[mask]
+    shape = peak_amp*np.exp(-((subset-peak_loc)**2)/(2*peak_width**2))
+    rand_factor = 1 + 0.2*np.random.randn(len(subset))
+    psd_peak[mask] = shape*rand_factor + 1e-18*rand_factor
+    return psd_peak
+
+def compute_autocorr_func(freqs, total_psd, tau_array, f_center):
+    df = freqs[1]-freqs[0]
+    phi = np.zeros_like(tau_array)
+    mask = freqs>0
+    for i, tau in enumerate(tau_array):
+        sin_term = np.sin(np.pi*freqs*tau)
+        sin_sq = sin_term**2
+        with np.errstate(divide='ignore',invalid='ignore'):
+            integrand = np.where(mask, total_psd*sin_sq/(freqs**2), 0)
+        phi[i] = 2*np.sum(integrand)*df
+    return np.exp(1j*2*np.pi*f_center*tau_array)*np.exp(-phi)
+
+def compute_psd(
+    N, T, f_center,
+    incl_fm3, amp_fm3,
+    incl_fm2, amp_fm2,
+    incl_fm1, amp_fm1,
+    incl_f0,  amp_f0,
+    incl_fp1, amp_fp1,
+    incl_fp2, amp_fp2,
+    incl_peak, peak_loc, peak_amp, peak_w
+):
+    dt = T/N
+    freqs = rfftfreq(N, dt)
+
+    f_min = 1.0/T
+    f_max = N/(2*T)
+    f_center = np.clip(f_center, f_min, f_max)
+    peak_loc = np.clip(peak_loc, f_min, f_max)
+
+    # PSD from user toggles
+    psd_contribs = []
+    if incl_fm3:
+        psd_contribs.append(('f^-3', generate_power_law_psd(freqs, -3, amp_fm3)))
+    if incl_fm2:
+        psd_contribs.append(('f^-2', generate_power_law_psd(freqs, -2, amp_fm2)))
+    if incl_fm1:
+        psd_contribs.append(('f^-1', generate_power_law_psd(freqs, -1, amp_fm1)))
+    if incl_f0:
+        psd_contribs.append(('f^0',  generate_power_law_psd(freqs,  0, amp_f0)))
+    if incl_fp1:
+        psd_contribs.append(('f^1',  generate_power_law_psd(freqs,  1, amp_fp1)))
+    if incl_fp2:
+        psd_contribs.append(('f^2',  generate_power_law_psd(freqs,  2, amp_fp2)))
+    if incl_peak:
+        psd_contribs.append(('Noise Peak', add_gaussian_peak(freqs, peak_loc, peak_amp, peak_w)))
+
+    if psd_contribs:
+        total_psd = np.sum([arr for lbl,arr in psd_contribs], axis=0)
+    else:
+        total_psd = np.ones_like(freqs)*1e-12
+
+    # Frequency noise -> time domain
+    phase_noise_freq = np.sqrt(total_psd)*(np.random.randn(len(freqs)) + 1j*np.random.randn(len(freqs)))
+    phase_noise_time = irfft(phase_noise_freq, n=N)
+
+    t_vals = np.arange(N)*dt
+    e_field = np.cos(2*np.pi*f_center*t_vals + phase_noise_time)
+
+    # Autocorr
+    tau_array = np.arange(-N//2, N//2)*dt
+    R_E_tau = compute_autocorr_func(freqs, total_psd, tau_array, f_center)
+    fft_res = fftshift(fft(R_E_tau))
+    auto_psd_full = np.abs(fft_res)**2
+    fft_freqs = fftshift(fftfreq(len(R_E_tau), dt))
+    mask_pos = fft_freqs>0
+
+    return {
+        'freqs': freqs,
+        'total_psd': total_psd,
+        'time': t_vals,
+        'e_field': e_field,
+        'auto_psd': auto_psd_full[mask_pos],
+        'freqs_auto': fft_freqs[mask_pos],
+        'f_center': f_center,
+        'psd_contribs': psd_contribs
+    }
+
+def plot_all(data, show_all, show_beta):
+    """Creates a Matplotlib Figure, returns it (for encoding)."""
+    freqs = data['freqs']
+    total_psd = data['total_psd']
+    time_vals = data['time']
+    e_field = data['e_field']
+    auto_psd = data['auto_psd']
+    fft_freqs = data['freqs_auto']
+    f_center = data['f_center']
+    psd_contribs = data['psd_contribs']
+
+    fig = plt.figure(figsize=(14,14), constrained_layout=True)
+    gs = GridSpec(3,2,figure=fig,height_ratios=[2,1,1.5])
+
+    # Subplot (1) Frequency Noise PSD
+    ax1 = fig.add_subplot(gs[0,:])
+
+    if show_all and psd_contribs:
+        for lbl, arr in psd_contribs:
+            ax1.loglog(freqs[freqs>0], arr[freqs>0], alpha=0.6, label=lbl)
+        ax1.legend()
+
+    alpha_val = 0.4 if show_all else 1.0
+    ax1.loglog(freqs[freqs>0], total_psd[freqs>0],
+               linewidth=2, color='tab:blue', alpha=alpha_val, label='Total PSD')
+
+    lw_instant = None
+    for lbl, arr in psd_contribs:
+        if lbl=='f^0':
+            maskp = freqs>0
+            if any(maskp):
+                S_0 = arr[maskp][0]
+                lw_instant = (1/(2*np.pi))*S_0
+            break
+
+    lw_beta = None
+    if show_beta:
+        pos_mask = freqs>0
+        beta_line = np.zeros_like(freqs)
+        beta_line[pos_mask] = (8*np.log(2)*freqs[pos_mask])/(np.pi**2)
+        ax1.loglog(freqs[pos_mask], beta_line[pos_mask],
+                   '--',color='green', label='Beta-separation line')
+        ax1.legend()
+
+        idx_beta = np.where((total_psd[pos_mask]<=beta_line[pos_mask]))[0]
+        if len(idx_beta)>0:
+            freq_sub = freqs[pos_mask]
+            f_beta = freq_sub[idx_beta[0]]
+            ax1.axvline(f_beta, color='red', linestyle='--', label=f'f_beta ~ {f_beta:.2e}')
+            ax1.legend()
+
+            idx_area = np.where((freqs>=0)&(freqs<=f_beta))[0]
+            if len(idx_area)>1:
+                area_val = cumulative_trapezoid(total_psd[idx_area], freqs[idx_area], initial=0)[-1]
+                lw_beta = np.sqrt(8*np.log(2)*area_val)
+
+    title_text = 'Simulated Frequency Noise PSD'
+
+    if lw_beta is not None:
+        title_text += f'\nLinewidth (beta-line): {lw_beta:.2e} Hz'
+
+    if lw_instant is not None:
+        title_text += f'\nInstantaneous Linewidth: {lw_instant:.2e} Hz'
+
+
+    ax1.set_title(title_text)
+    ax1.set_xlabel('Frequency (Hz)')
+    ax1.set_ylabel(r'Sδν(f) [Hz²/Hz]')
+    ax1.grid(True)
+    ax1.set_ylim(1e-8, np.max(total_psd[freqs>0])*1.1)
+
+    # Subplot (2): PSD from Autocorrelation
+    ax2 = fig.add_subplot(gs[1,0])
+    ax2.loglog(fft_freqs[fft_freqs>0], auto_psd[fft_freqs>0])
+    ax2.set_title('PSD from Autocorrelation')
+    ax2.set_xlabel('Frequency (Hz)')
+    ax2.set_ylabel('Power Spectral Density')
+    ax2.grid(True)
+
+    # Subplot (3): Time-Dependent E field
+    ax3 = fig.add_subplot(gs[1,1])
+    num_periods = 30
+    if f_center>0:
+        max_t = num_periods/f_center
+    else:
+        max_t = 1.0
+    subset = time_vals<=max_t
+    if np.any(subset):
+        ax3.plot(time_vals[subset], e_field[subset])
+        ax3.set_title('Time-Dependent Electric Field')
+        ax3.set_xlabel('Time (s)')
+        ax3.set_ylabel('Field amplitude')
+        ax3.grid(True)
+    else:
+        ax3.text(0.5,0.5,'No data for 30 periods', ha='center', va='center')
+
+    # Subplot (4): Zoomed PSD
+    ax4 = fig.add_subplot(gs[2,:])
+    delta_f = 1e4
+    fmin = f_center - delta_f/2
+    fmax = f_center + delta_f/2
+    if len(fft_freqs)>1:
+        fmin = max(fmin, fft_freqs[1])
+        fmax = min(fmax, fft_freqs[-1])
+    mask_zoom = (fft_freqs>=fmin)&(fft_freqs<=fmax)
+    freqs_zoom = fft_freqs[mask_zoom]
+    psd_zoom = auto_psd[mask_zoom]
+    freq_rel = freqs_zoom - f_center
+
+    ax4.plot(freq_rel, psd_zoom, label='PSD')
+    if len(psd_zoom)>0:
+        hm = psd_zoom.max()/2
+        idx_hm = np.where(psd_zoom>=hm)[0]
+        if len(idx_hm)>=2:
+            fwhm = freq_rel[idx_hm[-1]] - freq_rel[idx_hm[0]]
+            ax4.set_title(f'Zoomed PSD (FWHM ~ {fwhm:.2e} Hz)')
+        else:
+            ax4.set_title('Zoomed PSD (no full half-max crossing)')
+    else:
+        ax4.set_title('Zoomed PSD: No data')
+
+    ax4.set_xlabel('f - f₀ (Hz)')
+    ax4.set_ylabel('PSD')
+    ax4.grid(True)
+    ax4.legend()
+
+    return fig
+
+def updatePlot(*args, **kwargs):
+
+    # 1) Clear old image
+    js.document.getElementById("plots").innerHTML = ""
+
+    # 2) Read from DOM
+    N_val = int(js.document.getElementById("N_value").value)
+    T_val = float(js.document.getElementById("T_value").value)
+    f_val = float(js.document.getElementById("f_central_value").value)
+
+    incl_fm3 = js.document.getElementById("include_fm3").checked
+    amp_fm3_val = float(js.document.getElementById("amp_fm3").value)
+
+    incl_fm2 = js.document.getElementById("include_fm2").checked
+    amp_fm2_val = float(js.document.getElementById("amp_fm2").value)
+
+    incl_fm1 = js.document.getElementById("include_fm1").checked
+    amp_fm1_val = float(js.document.getElementById("amp_fm1").value)
+
+    incl_f0 = js.document.getElementById("include_f0").checked
+    amp_f0_val = float(js.document.getElementById("amp_f0").value)
+
+    incl_fp1 = js.document.getElementById("include_fp1").checked
+    amp_fp1_val = float(js.document.getElementById("amp_fp1").value)
+
+    incl_fp2 = js.document.getElementById("include_fp2").checked
+    amp_fp2_val = float(js.document.getElementById("amp_fp2").value)
+
+    incl_peak = js.document.getElementById("include_peak").checked
+    peak_loc = float(js.document.getElementById("peak_location").value)
+    peak_amp = float(js.document.getElementById("peak_amplitude").value)
+    peak_wid = float(js.document.getElementById("peak_width").value)
+
+    show_all_val = js.document.getElementById("show_all").checked
+    show_beta_val = js.document.getElementById("show_beta_line").checked
+
+    # 3) Compute new data
+    data = compute_psd(
+        N_val, T_val, f_val,
+        incl_fm3, amp_fm3_val,
+        incl_fm2, amp_fm2_val,
+        incl_fm1, amp_fm1_val,
+        incl_f0, amp_f0_val,
+        incl_fp1, amp_fp1_val,
+        incl_fp2, amp_fp2_val,
+        incl_peak, peak_loc, peak_amp, peak_wid
+    )
+
+    # 4) Create new figure
+    fig = plot_all(data, show_all_val, show_beta_val)
+
+    # 5) Convert figure to PNG in memory (base64-encoded)
+    import io, base64
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=100)
+    buf.seek(0)
+    b64_img = base64.b64encode(buf.read()).decode('utf-8')
+    buf.close()
+
+    html_img = f'<img src="data:image/png;base64,{b64_img}" alt="Plot" style="max-width:100%;">'
+    js.document.getElementById("plots").innerHTML = html_img
+
+    # 7) Close the figure
+    plt.close(fig)
+
+
+# On page load, do one initial run with defaults
+updatePlot()
+    </py-script>
+  </body>
+</html>
